@@ -1,0 +1,507 @@
+{
+  "name": "YT Trend Scraper",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
+        }
+      },
+      "id": "66389d1e-9fe8-47dc-8fa9-81b62c0a9961",
+      "name": "Daily Scheduler",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2640,
+        100
+      ],
+      "notes": "Triggers daily at 6 AM to collect fresh trends"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Initialize trend collection arrays\nconst trends = {\n  youtube: [],\n  tiktok: [],\n  google: [],\n  reddit: []\n};\n\n// Set current date for tracking\nconst currentDate = new Date().toISOString().split('T')[0];\n\n// Pass data to next nodes\nreturn [{\n  json: {\n    date: currentDate,\n    trends: trends,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "57a272e4-f047-4a32-adcc-06516a28d1f5",
+      "name": "Initialize Data Structure",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -2420,
+        100
+      ],
+      "notes": "Sets up data structure for trend collection"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process YouTube trends\nconst youtubeData = $input.all().find(item => item.json.items);\nconst youtubeTrends = [];\n\nif (youtubeData && youtubeData.json.items) {\n  youtubeData.json.items.forEach((video, index) => {\n    youtubeTrends.push({\n      rank: index + 1,\n      platform: 'YouTube',\n      title: video.snippet.title,\n      description: video.snippet.description?.substring(0, 100) + '...',\n      views: parseInt(video.statistics.viewCount),\n      likes: parseInt(video.statistics.likeCount || 0),\n      engagement: parseInt(video.statistics.viewCount) + parseInt(video.statistics.likeCount || 0),\n      category: video.snippet.categoryId,\n      publishedAt: video.snippet.publishedAt,\n      channelTitle: video.snippet.channelTitle,\n      tags: video.snippet.tags?.join(', ') || '',\n      url: `https://youtube.com/watch?v=${video.id}`,\n      trend_score: parseInt(video.statistics.viewCount) * 0.7 + parseInt(video.statistics.likeCount || 0) * 0.3\n    });\n  });\n}\n\n// Process Google Trends\nconst googleData = $input.all().find(item => item.json.default);\nconst googleTrends = [];\n\nif (googleData && googleData.json.default) {\n  try {\n    const trendsData = JSON.parse(googleData.json.default.trendsData);\n    trendsData.forEach((trend, index) => {\n      googleTrends.push({\n        rank: index + 1,\n        platform: 'Google',\n        title: trend.title,\n        description: trend.articles?.[0]?.snippet || '',\n        search_volume: trend.traffic || 0,\n        category: trend.category || 'General',\n        location: 'US',\n        trend_score: trend.traffic || index * 10,\n        related_queries: trend.relatedQueries?.join(', ') || ''\n      });\n    });\n  } catch (e) {\n    console.log('Error parsing Google Trends data:', e);\n  }\n}\n\n// Process Reddit trends\nconst redditData = $input.all().find(item => item.json.data?.children);\nconst redditTrends = [];\n\nif (redditData && redditData.json.data.children) {\n  redditData.json.data.children.forEach((post, index) => {\n    const postData = post.data;\n    redditTrends.push({\n      rank: index + 1,\n      platform: 'Reddit',\n      title: postData.title,\n      description: postData.selftext?.substring(0, 100) + '...' || '',\n      subreddit: postData.subreddit,\n      upvotes: postData.ups,\n      comments: postData.num_comments,\n      award_count: postData.total_awards_received || 0,\n      created: new Date(postData.created_utc * 1000).toISOString(),\n      url: `https://reddit.com${postData.permalink}`,\n      trend_score: postData.ups * 0.6 + postData.num_comments * 0.4\n    });\n  });\n}\n\n// Combine all trends\nconst allTrends = [\n  ...youtubeTrends,\n  ...googleTrends,\n  ...redditTrends\n];\n\n// Sort by trend_score and take top 100\nconst top100Trends = allTrends\n  .sort((a, b) => b.trend_score - a.trend_score)\n  .slice(0, 100)\n  .map((trend, index) => ({\n    ...trend,\n    final_rank: index + 1,\n    date: new Date().toISOString().split('T')[0]\n  }));\n\nreturn [{\n  json: {\n    trends: top100Trends,\n    total_collected: allTrends.length,\n    date: new Date().toISOString().split('T')[0],\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "06bebe65-cf16-48ab-87c0-a3197921f230",
+      "name": "Process & Score Trends",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -1980,
+        100
+      ],
+      "notes": "Processes all platform data, scores trends, and creates top 100 list"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Add delay to avoid rate limiting\nconst delay = ms => new Promise(resolve => setTimeout(resolve, ms));\n\n// Wait 2 seconds before proceeding\nawait delay(2000);\n\n// Pass through the trends data\nreturn [{\n  json: {\n    ...$json,\n    clearDataReady: true,\n    message: 'Ready to clear previous data after rate limit delay'\n  }\n}];"
+      },
+      "id": "b09f2140-544c-4769-99e3-bb611b182dc0",
+      "name": "Rate Limit Delay",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -1780,
+        100
+      ],
+      "notes": "Adds 2 second delay to avoid Google Sheets API rate limiting"
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "1kWq5cuKH6S9k6161-Su2YCijv7sfQW9_xcXUY3gytCA",
+          "mode": "list",
+          "cachedResultName": "Trend scraper",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1kWq5cuKH6S9k6161-Su2YCijv7sfQW9_xcXUY3gytCA/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Daily Trends",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1kWq5cuKH6S9k6161-Su2YCijv7sfQW9_xcXUY3gytCA/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "url"
+          ],
+          "schema": [
+            {
+              "id": "rank",
+              "displayName": "rank",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "platform",
+              "displayName": "platform",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "views",
+              "displayName": "views",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "likes",
+              "displayName": "likes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "engagement",
+              "displayName": "engagement",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "category",
+              "displayName": "category",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "publishedAt",
+              "displayName": "publishedAt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "channelTitle",
+              "displayName": "channelTitle",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "tags",
+              "displayName": "tags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "url",
+              "displayName": "url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "trend_score",
+              "displayName": "trend_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "final_rank",
+              "displayName": "final_rank",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "77a41fb0-aa5d-44ce-961b-abe3eb5aaad5",
+      "name": "Write Trends to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        -1160,
+        100
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "k59mYE0QWoSFsJVl",
+          "name": "Google Sheets account"
+        }
+      },
+      "notes": "Writes top 100 trends to Google Sheet with all relevant data"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Create summary statistics\nconst trends = $json.trends;\nconst platformStats = {};\n\n// Count trends by platform\ntrends.forEach(trend => {\n  platformStats[trend.platform] = (platformStats[trend.platform] || 0) + 1;\n});\n\n// Calculate average trend scores\nconst avgScores = {};\nObject.keys(platformStats).forEach(platform => {\n  const platformTrends = trends.filter(t => t.platform === platform);\n  avgScores[platform] = platformTrends.reduce((sum, t) => sum + t.trend_score, 0) / platformTrends.length;\n});\n\n// Create summary object\nconst summary = {\n  total_trends: trends.length,\n  date: $json.date,\n  platform_breakdown: platformStats,\n  average_scores: avgScores,\n  top_trend: trends[0],\n  collection_timestamp: $json.timestamp\n};\n\nconsole.log('Daily Trends Summary:', JSON.stringify(summary, null, 2));\n\nreturn [{\n  json: {\n    ...summary,\n    success: true,\n    message: `Successfully collected and processed ${trends.length} trends for ${$json.date}`\n  }\n}];"
+      },
+      "id": "b4cd626f-e78b-40aa-b9d5-2f7f20a100a3",
+      "name": "Create Summary Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -960,
+        100
+      ],
+      "notes": "Creates daily summary statistics and logs completion"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "error-check",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2b86b55b-7679-434a-9cdf-31baf945eb9c",
+      "name": "Success Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -760,
+        100
+      ],
+      "notes": "Checks if workflow completed successfully"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Send success notification\nconst summary = $json;\n\nreturn [{\n  json: {\n    subject: `✅ Daily Trends Collection Complete - ${summary.date}`,\n    message: `Successfully collected ${summary.total_trends} trends:\\n\\nPlatform Breakdown:\\n${Object.entries(summary.platform_breakdown).map(([platform, count]) => `• ${platform}: ${count} trends`).join('\\n')}\\n\\nTop Trend: ${summary.top_trend.title} (${summary.top_trend.platform})\\n\\nData updated in Google Sheet at ${summary.collection_timestamp}`,\n    success: true\n  }\n}];"
+      },
+      "id": "af001b29-73a8-4073-b464-13503b1c1dd4",
+      "name": "Success Notification",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        0
+      ],
+      "notes": "Prepares success notification message"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Handle errors and create error report\nconst error = $json.error || 'Unknown error occurred';\n\nreturn [{\n  json: {\n    subject: `❌ Daily Trends Collection Failed - ${new Date().toISOString().split('T')[0]}`,\n    message: `Trends collection workflow failed:\\n\\nError: ${error}\\n\\nPlease check the workflow logs and API credentials.\\n\\nTimestamp: ${new Date().toISOString()}`,\n    success: false,\n    error: error\n  }\n}];"
+      },
+      "id": "35d3279d-4a98-4eb3-83d8-1002f69cea55",
+      "name": "Error Notification",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        220
+      ],
+      "notes": "Prepares error notification message"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "trends",
+        "options": {}
+      },
+      "id": "10120519-2052-4d3c-95a0-c2328228f36e",
+      "name": "Split Trends into Items",
+      "type": "n8n-nodes-base.itemLists",
+      "typeVersion": 1,
+      "position": [
+        -1360,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/youtube/v3/videos",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "part",
+              "value": "snippet,statistics"
+            },
+            {
+              "name": "chart",
+              "value": "mostPopular"
+            },
+            {
+              "name": "regionCode",
+              "value": "US"
+            },
+            {
+              "name": "maxResults",
+              "value": "25"
+            },
+            {
+              "name": "key",
+              "value": "AIzaSyBylEiNSEUKSKD1YIYrvbMfvbgBQOfnmdk"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bfe1dcac-43f4-4521-a313-d0a77034b4f7",
+      "name": "YouTube Trends API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        -2200,
+        100
+      ],
+      "notes": "Fetches trending videos from YouTube - Remove videoCategoryId for broader results"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Scheduler": {
+      "main": [
+        [
+          {
+            "node": "Initialize Data Structure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Initialize Data Structure": {
+      "main": [
+        [
+          {
+            "node": "YouTube Trends API",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Process & Score Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process & Score Trends": {
+      "main": [
+        [
+          {
+            "node": "Rate Limit Delay",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rate Limit Delay": {
+      "main": [
+        [
+          {
+            "node": "Split Trends into Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Trends into Items": {
+      "main": [
+        [
+          {
+            "node": "Write Trends to Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Trends to Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Create Summary Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Summary Report": {
+      "main": [
+        [
+          {
+            "node": "Success Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Success Check": {
+      "main": [
+        [
+          {
+            "node": "Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "YouTube Trends API": {
+      "main": [
+        [
+          {
+            "node": "Process & Score Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ab1a3c47-6b0e-4563-abbe-f8a82b6b094f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a8efdba97f8e03989f0d6c287cf79d0a798900e54fe5de8a4be8261848d5b0ce"
+  },
+  "id": "JWVizeACDGBB6Fmc",
+  "tags": []
+}
