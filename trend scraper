@@ -1,0 +1,180 @@
+{
+  "name": "Brainrot Content Scraper to Discord",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "2701f5ef-0c17-48f8-b3de-b83c509ef490",
+      "name": "Every Day at 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        340
+      ],
+      "notes": "This workflow starts once a day.\nYou can change the time or frequency here."
+    },
+    {
+      "parameters": {
+        "operation": "dailyTrends",
+        "geo": "US"
+      },
+      "id": "6fd2e8da-ebed-48f0-b6a8-f7560a638b97",
+      "name": "Get Google Daily Trends",
+      "type": "n8n-nodes-base.googleTrends",
+      "typeVersion": 1,
+      "position": [
+        700,
+        340
+      ],
+      "notes": "Finds the top search trends for the day in the United States. This is our primary signal for what's popular."
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "e43b17c8-028f-4318-8f85-79b882eb7502",
+      "name": "Loop Over Each Trend",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 2,
+      "position": [
+        920,
+        340
+      ],
+      "notes": "This node processes each trend from Google one-by-one so we can search for them individually."
+    },
+    {
+      "parameters": {
+        "resource": "post",
+        "operation": "search",
+        "query": "={{ $json.title.query }}",
+        "subreddit": "OutOfTheLoop,memes,dankmemes",
+        "sort": "top",
+        "timeframe": "day",
+        "limit": 1,
+        "options": {}
+      },
+      "id": "20875e4e-0a06-4074-a690-3a568b2413a1",
+      "name": "Search Reddit for Context",
+      "type": "n8n-nodes-base.reddit",
+      "typeVersion": 1,
+      "position": [
+        1140,
+        340
+      ],
+      "notes": "For each trend, this searches popular subreddits for the top post of the day related to that trend. This finds the actual 'content'."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $items().length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "3bb87d0c-a63e-4340-9a3c-1b6c000bd93d",
+      "name": "If Reddit Post Found",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1360,
+        340
+      ],
+      "notes": "This check ensures we only continue if we actually found a relevant post on Reddit, otherwise we stop."
+    },
+    {
+      "parameters": {
+        "webhookUrl": {
+          "url": ""
+        },
+        "text": "🔥 **New Brainrot Topic Alert!** 🔥\n\n**Search Trend:**\n> `{{ $('Loop Over Each Trend').item.json.title.query }}`\n\n**Top Related Post Found on Reddit:**\n## [{{ $json.title }}](${{ $json.url }})\n**Subreddit:** r/{{ $json.subreddit }}\n**Upvotes:** {{ $json.score }}\n\n`Source: Google Trends & Reddit`",
+        "options": {}
+      },
+      "id": "1d8b609c-e35b-4394-a15d-114172f32386",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 1,
+      "position": [
+        1580,
+        240
+      ],
+      "notes": "Posts the formatted message to your Discord channel.\n\n**ACTION REQUIRED:**\nYou must add your Discord Webhook URL credential here.",
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "",
+          "name": ""
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every Day at 9am": {
+      "main": [
+        [
+          {
+            "node": "Get Google Daily Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Google Daily Trends": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Each Trend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Each Trend": {
+      "main": [
+        [
+          {
+            "node": "Search Reddit for Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Reddit for Context": {
+      "main": [
+        [
+          {
+            "node": "If Reddit Post Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Reddit Post Found": {
+      "main": [
+        [
+          {
+            "node": "Post to Discord",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
